@@ -1,0 +1,29 @@
+DECLARE @X xml
+SELECT @X = CAST (t.target_data as XML)
+FROM sys.dm_xe_session_targets t
+join sys.dm_xe_sessions s on t.event_session_address = s.address
+WHERE s.name = 'WaitStats'
+
+SELECT 
+	waits.[Wait Type],
+	count(*) as [Wait Count],
+	SUM(waits.[Duration]) as [Total Wait Time (ms)],
+	SUM(waits.[Duration]) - sum(waits.[Signal Duration]) as [Total Resource Wait Time],
+	sum(COALESCE(waits.[Signal Duration],0)) as [Total Signal Wait Time (ms)]
+FROM
+(
+SELECT 
+	event_data.value ('(@timestamp)[1]','DATETIME') as [Time],
+	event_data.value ('(data[@name=''wait_type'']/text)[1]','NVARCHAR(100)') as [Wait Type],
+	event_data.value ('(data[@name=''opcode'']/text)[1]','NVARCHAR(100)') as [op],
+	event_data.value ('(data[@name=''duration'']/value)[1]','BIGINT') as [Duration],
+	event_data.value ('(data[@name=''signal_duration'']/value)[1]','BIGINT') as [Signal Duration]
+
+FROM @X.nodes ('RingBufferTarget/Event') as t(event_data)
+) waits
+WHERE waits.[op] = 'End'
+GROUP BY waits.[Wait Type]
+ORDER BY [Total Wait Time (ms)] DESC;
+
+
+/*Session prop. Event: wait_info. Actions: duration, opcode, signal_duration, wait_type*/
